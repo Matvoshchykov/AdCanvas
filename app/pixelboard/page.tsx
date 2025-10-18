@@ -44,7 +44,7 @@ export default function PixelBoardPage() {
 
   // Get current user ID (use Whop user or fallback to mock)
   const userId = user?.id || `mock_user_${typeof window !== 'undefined' ? localStorage.getItem('mockUserId') || Math.random().toString(36).substring(7) : 'dev'}`;
-  const userName = user?.username || user?.email?.split('@')[0] || 'Anonymous';
+  const userName = user?.username || user?.email?.split('@')[0] || userId;
 
   // Store mock user ID in localStorage for consistency during development
   useEffect(() => {
@@ -347,32 +347,32 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_key`}
     );
   }
 
+  // Show only mobile message on mobile devices
+  if (isMobile) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center">
+        <div className="text-center px-6 max-w-md">
+          <div className="mb-8">
+            <svg className="w-20 h-20 mx-auto text-orange-500 mb-6" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 0a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V8zm0 4a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1v-2z" clipRule="evenodd" />
+            </svg>
+            <h1 className="text-2xl font-bold mb-4">Desktop Required</h1>
+            <p className="text-gray-300 text-lg leading-relaxed">
+              This app must be accessed using a computer device for the best experience.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`min-h-screen ${
       theme === 'dark' ? 'bg-zinc-950 text-white' : 'bg-gray-50 text-gray-900'
     }`}>
 
-      {/* Mobile Notice */}
-      {isMobile && (
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3, type: "spring", stiffness: 300, damping: 30 }}
-          className="fixed top-0 left-0 right-0 z-[100] bg-orange-500 text-white p-3 text-center shadow-lg"
-        >
-          <div className="flex items-center justify-center gap-2">
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-            </svg>
-            <span className="font-medium text-sm">
-              For the best experience, please view this app on a desktop device
-            </span>
-          </div>
-        </motion.div>
-      )}
-
       {/* Main Content - Canvas fills full screen */}
-      <div className="relative" style={{ height: isMobile ? 'calc(100vh - 60px)' : '100vh', marginTop: isMobile ? '60px' : '0' }}>
+      <div className="relative" style={{ height: '100vh' }}>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
