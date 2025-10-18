@@ -69,14 +69,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Check cooldown
-    const { data: cooldownData } = await supabase
+    const { data: cooldownData, error: cooldownCheckError } = await supabase
       .from('user_cooldowns')
       .select('*')
       .eq('user_id', userId)
       .single();
 
-    if (cooldownData) {
-      const lastPlacement = new Date(cooldownData.last_placement);
+    if (cooldownData && !cooldownCheckError) {
+      const lastPlacement = new Date((cooldownData as Database['public']['Tables']['user_cooldowns']['Row']).last_placement);
       const now = new Date();
       const minutesSinceLastPlacement = (now.getTime() - lastPlacement.getTime()) / (1000 * 60);
 
@@ -96,16 +96,18 @@ export async function POST(request: NextRequest) {
     }
 
     // Place the pixel
+    const pixelInsertData: Database['public']['Tables']['pixels']['Insert'] = {
+      x,
+      y,
+      color,
+      link: link || null,
+      owner_id: userId,
+      owner_name: userName || null,
+    };
+
     const { data: newPixel, error: insertError } = await supabase
       .from('pixels')
-      .insert({
-        x,
-        y,
-        color,
-        link: link || null,
-        owner_id: userId,
-        owner_name: userName || null,
-      })
+      .insert(pixelInsertData as any)
       .select()
       .single();
 
@@ -118,12 +120,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Update cooldown (trigger will handle this, but we can also do it manually)
+    const cooldownInsertData: Database['public']['Tables']['user_cooldowns']['Insert'] = {
+      user_id: userId,
+      last_placement: new Date().toISOString(),
+    };
+
     const { error: cooldownError } = await supabase
       .from('user_cooldowns')
-      .upsert({
-        user_id: userId,
-        last_placement: new Date().toISOString(),
-      });
+      .upsert(cooldownInsertData as any);
 
     if (cooldownError) {
       console.error('Error updating cooldown:', cooldownError);

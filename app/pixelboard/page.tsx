@@ -17,7 +17,9 @@ const GRID_HEIGHT = 400;
 function useWhopUser() {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { useUser } = require('@whop/react/hooks');
+    const { useUser } = require('@whop/react/hooks') as {
+      useUser: () => { user: any; isLoading: boolean };
+    };
     return useUser();
   } catch {
     // Fallback for development without Whop

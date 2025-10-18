@@ -22,13 +22,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Get user's last placement time
-    const { data: cooldownData } = await supabase
+    const { data: cooldownData, error: cooldownError } = await supabase
       .from('user_cooldowns')
       .select('*')
       .eq('user_id', userId)
       .single();
 
-    if (!cooldownData) {
+    if (cooldownError || !cooldownData) {
       // User has never placed a pixel
       return NextResponse.json({
         canPlace: true,
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const lastPlacement = new Date(cooldownData.last_placement);
+    const lastPlacement = new Date((cooldownData as Database['public']['Tables']['user_cooldowns']['Row']).last_placement);
     const now = new Date();
     const minutesSinceLastPlacement = (now.getTime() - lastPlacement.getTime()) / (1000 * 60);
 
