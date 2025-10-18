@@ -3,6 +3,7 @@
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { useEffect, useState } from "react";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 
 const inter = Inter({
 	variable: "--font-inter",
@@ -52,7 +53,9 @@ export default function RootLayout({
 				<meta name="description" content="A Reddit r/place inspired pixel board game for Whop communities. Place pixels, share links, and promote your products!" />
 			</head>
 			<body className={`${inter.variable} antialiased font-sans`}>
-				<WhopWrapper>{children}</WhopWrapper>
+				<ThemeProvider>
+					<WhopWrapper>{children}</WhopWrapper>
+				</ThemeProvider>
 			</body>
 		</html>
 	);

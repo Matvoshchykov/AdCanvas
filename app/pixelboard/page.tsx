@@ -6,6 +6,7 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import PixelGrid from '@/components/PixelGrid';
 import PixelModal from '@/components/PixelModal';
 import PlacementControls from '@/components/PlacementControls';
+import { useTheme } from '@/contexts/ThemeContext';
 import type { Database } from '@/lib/database.types';
 
 type Pixel = Database['public']['Tables']['pixels']['Row'];
@@ -28,6 +29,7 @@ function useWhopUser() {
 }
 
 export default function PixelBoardPage() {
+  const { theme } = useTheme();
   const { user, isLoading: userLoading } = useWhopUser();
   
   const [pixels, setPixels] = useState<Pixel[]>([]);
@@ -298,7 +300,9 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_key`}
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white">
+    <div className={`min-h-screen ${
+      theme === 'dark' ? 'bg-zinc-950 text-white' : 'bg-gray-50 text-gray-900'
+    }`}>
 
       {/* Main Content - Canvas fills full screen */}
       <div className="relative" style={{ height: '100vh' }}>
@@ -306,7 +310,9 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_key`}
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.1 }}
-              className="absolute inset-0 bg-zinc-900"
+              className={`absolute inset-0 ${
+                theme === 'dark' ? 'bg-zinc-900' : 'bg-gray-100'
+              }`}
             >
           <PixelGrid
             pixels={pixels}

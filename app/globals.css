@@ -10,13 +10,24 @@
 	box-sizing: border-box;
 }
 
-html {
+/* Light theme as default */
+:root {
+	color-scheme: light;
+}
+
+/* Dark theme */
+.dark {
 	color-scheme: dark;
 }
 
-body {
+.dark body {
 	background: #0e0e10;
 	color: #ffffff;
+}
+
+body {
+	background: #ffffff;
+	color: #0e0e10;
 	font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
 		'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
 	-webkit-font-smoothing: antialiased;
@@ -43,21 +54,35 @@ html {
 	scroll-behavior: smooth;
 }
 
-/* Custom scrollbar for dark theme */
+/* Custom scrollbar for light and dark themes */
 ::-webkit-scrollbar {
 	width: 10px;
 	height: 10px;
 }
 
+/* Light theme scrollbar */
 ::-webkit-scrollbar-track {
-	background: #1a1a1d;
+	background: #f1f1f1;
 }
 
 ::-webkit-scrollbar-thumb {
-	background: #3a3a3d;
+	background: #c1c1c1;
 	border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
+	background: #a1a1a1;
+}
+
+/* Dark theme scrollbar */
+.dark ::-webkit-scrollbar-track {
+	background: #1a1a1d;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+	background: #3a3a3d;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
 	background: #4a4a4d;
 }

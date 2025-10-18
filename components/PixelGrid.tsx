@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import type { Database } from '@/lib/database.types';
+import { useTheme } from '@/contexts/ThemeContext';
 
 type Pixel = Database['public']['Tables']['pixels']['Row'];
 
@@ -21,6 +22,7 @@ export default function PixelGrid({
   onPixelClick,
   selectedPosition,
 }: PixelGridProps) {
+  const { theme } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -34,10 +36,26 @@ export default function PixelGrid({
   const lastWheelTime = useRef(0);
   const zoomTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
+  // Mobile touch state
+  const [touches, setTouches] = useState<React.TouchList | null>(null);
+  const [lastTouchDistance, setLastTouchDistance] = useState(0);
+  const [lastTouchCenter, setLastTouchCenter] = useState({ x: 0, y: 0 });
+  const [isMobile, setIsMobile] = useState(false);
+  
   // Create a map of pixels for faster lookup
   const pixelMap = useRef<Map<string, Pixel>>(new Map());
 
-  // Initialize canvas position - zoomed out to see WHOLE map, CENTERED
+  // Detect mobile device
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768 || 'ontouchstart' in window);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Initialize canvas position - different behavior for mobile vs desktop
   useEffect(() => {
     const initializeCanvas = () => {
       const container = containerRef.current;
@@ -48,23 +66,39 @@ export default function PixelGrid({
       const canvasWidth = gridWidth * 10;
       const canvasHeight = gridHeight * 10;
       
-      // Force scale to fit entire canvas in view - ensure WHOLE map is visible
-      const minScaleX = containerWidth / canvasWidth;
-      const minScaleY = containerHeight / canvasHeight;
-      const fitScale = Math.min(minScaleX, minScaleY) * 0.8; // 80% to guarantee whole map fits
-      
-      setScale(fitScale);
-      
-      // PERFECTLY CENTER the canvas with equal margins on all sides
-      const scaledWidth = canvasWidth * fitScale;
-      const scaledHeight = canvasHeight * fitScale;
-      
-      // Ensure canvas is centered with equal margins on ALL sides
-      const centerX = (containerWidth - scaledWidth) / 2;
-      const centerY = (containerHeight - scaledHeight) / 2;
-      
-      
-      setOffset({ x: centerX, y: centerY });
+      if (isMobile) {
+        // Mobile: Start zoomed in to fill screen
+        const maxScaleX = containerWidth / canvasWidth;
+        const maxScaleY = containerHeight / canvasHeight;
+        const zoomedScale = Math.max(maxScaleX, maxScaleY) * 1.2; // Zoomed in with some margin
+        
+        setScale(zoomedScale);
+        
+        // Center the canvas when zoomed in
+        const scaledWidth = canvasWidth * zoomedScale;
+        const scaledHeight = canvasHeight * zoomedScale;
+        const centerX = (containerWidth - scaledWidth) / 2;
+        const centerY = (containerHeight - scaledHeight) / 2;
+        
+        setOffset({ x: centerX, y: centerY });
+      } else {
+        // Desktop: Start zoomed out to see whole map
+        const minScaleX = containerWidth / canvasWidth;
+        const minScaleY = containerHeight / canvasHeight;
+        const fitScale = Math.min(minScaleX, minScaleY) * 0.8; // 80% to guarantee whole map fits
+        
+        setScale(fitScale);
+        
+        // PERFECTLY CENTER the canvas with equal margins on all sides
+        const scaledWidth = canvasWidth * fitScale;
+        const scaledHeight = canvasHeight * fitScale;
+        
+        // Ensure canvas is centered with equal margins on ALL sides
+        const centerX = (containerWidth - scaledWidth) / 2;
+        const centerY = (containerHeight - scaledHeight) / 2;
+        
+        setOffset({ x: centerX, y: centerY });
+      }
     };
 
     // Try immediately first
@@ -80,7 +114,7 @@ export default function PixelGrid({
       clearTimeout(timer2);
       clearTimeout(timer3);
     };
-  }, [gridWidth, gridHeight]);
+  }, [gridWidth, gridHeight, isMobile]);
 
   useEffect(() => {
     // Update pixel map
@@ -106,12 +140,12 @@ export default function PixelGrid({
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
 
-    // Clear canvas with smooth rendering
-    ctx.fillStyle = '#0e0e10';
+    // Clear canvas with smooth rendering - theme aware
+    ctx.fillStyle = theme === 'dark' ? '#0e0e10' : '#ffffff';
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-    // Draw grid lines
-    ctx.strokeStyle = '#1f1f22';
+    // Draw grid lines - theme aware
+    ctx.strokeStyle = theme === 'dark' ? '#1f1f22' : '#e5e5e5';
     ctx.lineWidth = 0.5;
 
     // Vertical lines
@@ -141,9 +175,9 @@ export default function PixelGrid({
       );
     }
 
-    // Draw selected position
+    // Draw selected position - theme aware
     if (selectedPosition) {
-      ctx.strokeStyle = '#ffffff';
+      ctx.strokeStyle = theme === 'dark' ? '#ffffff' : '#000000';
       ctx.lineWidth = 2;
       ctx.strokeRect(
         selectedPosition.x * pixelSize + 1,
@@ -152,7 +186,7 @@ export default function PixelGrid({
         pixelSize - 2
       );
     }
-  }, [pixels, gridWidth, gridHeight, scale, selectedPosition]);
+  }, [pixels, gridWidth, gridHeight, scale, selectedPosition, theme]);
 
   // Draw the grid with smooth updates
   useEffect(() => {
@@ -280,6 +314,131 @@ export default function PixelGrid({
     [gridWidth, gridHeight, scale, onPixelClick, clickStartPos]
   );
 
+  // Mobile touch handlers
+  const getTouchDistance = (touches: React.TouchList) => {
+    if (touches.length !== 2) return 0;
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const getTouchCenter = (touches: React.TouchList, container: HTMLElement) => {
+    if (touches.length === 0) return { x: 0, y: 0 };
+    if (touches.length === 1) {
+      const rect = container.getBoundingClientRect();
+      return { x: touches[0].clientX - rect.left, y: touches[0].clientY - rect.top };
+    }
+    const rect = container.getBoundingClientRect();
+    const x = (touches[0].clientX + touches[1].clientX) / 2 - rect.left;
+    const y = (touches[0].clientY + touches[1].clientY) / 2 - rect.top;
+    return { x, y };
+  };
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    e.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+
+    setTouches(e.touches);
+    
+    if (e.touches.length === 1) {
+      // Single touch - start dragging
+      const touch = e.touches[0];
+      const rect = container.getBoundingClientRect();
+      setIsDragging(true);
+      setDragStart({ x: touch.clientX - rect.left - offset.x, y: touch.clientY - rect.top - offset.y });
+    } else if (e.touches.length === 2) {
+      // Two touches - prepare for pinch zoom
+      const distance = getTouchDistance(e.touches);
+      const center = getTouchCenter(e.touches, container);
+      setLastTouchDistance(distance);
+      setLastTouchCenter(center);
+      setIsZooming(true);
+      setIsDragging(false);
+    }
+  }, [offset]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    e.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+
+    if (e.touches.length === 1 && isDragging) {
+      // Single touch drag
+      const touch = e.touches[0];
+      const rect = container.getBoundingClientRect();
+      const newX = touch.clientX - rect.left - dragStart.x;
+      const newY = touch.clientY - rect.top - dragStart.y;
+      setOffset({ x: newX, y: newY });
+    } else if (e.touches.length === 2) {
+      // Two finger pinch zoom
+      const distance = getTouchDistance(e.touches);
+      const center = getTouchCenter(e.touches, container);
+      
+      if (lastTouchDistance > 0) {
+        const scaleFactor = distance / lastTouchDistance;
+        const newScale = Math.max(0.1, Math.min(10, scale * scaleFactor));
+        
+        // Calculate the point under the center of touches before zoom
+        const worldX = (center.x - offset.x) / scale;
+        const worldY = (center.y - offset.y) / scale;
+        
+        // Calculate new offset to keep the same point under the touches after zoom
+        const newOffsetX = center.x - worldX * newScale;
+        const newOffsetY = center.y - worldY * newScale;
+        
+        setScale(newScale);
+        setOffset({ x: newOffsetX, y: newOffsetY });
+      }
+      
+      setLastTouchDistance(distance);
+      setLastTouchCenter(center);
+    }
+  }, [scale, offset, isDragging, dragStart, lastTouchDistance]);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    setIsDragging(false);
+    setIsZooming(false);
+    setTouches(null);
+    setLastTouchDistance(0);
+  }, []);
+
+  const handleCanvasTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    // Only handle single touch for pixel selection
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      setClickStartPos({ x: touch.clientX, y: touch.clientY });
+    }
+  }, []);
+
+  const handleCanvasTouchEnd = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    // Only handle single touch end for pixel selection
+    if (e.changedTouches.length === 1 && !isDragging) {
+      const touch = e.changedTouches[0];
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      // Only register tap if touch hasn't moved much (not a drag)
+      const dragDistance = Math.sqrt(
+        Math.pow(touch.clientX - clickStartPos.x, 2) + 
+        Math.pow(touch.clientY - clickStartPos.y, 2)
+      );
+      
+      if (dragDistance > 10) return; // Was a drag, not a tap
+      
+      const rect = canvas.getBoundingClientRect();
+      const pixelSize = 10 * scale;
+      
+      const x = Math.floor((touch.clientX - rect.left) / pixelSize);
+      const y = Math.floor((touch.clientY - rect.top) / pixelSize);
+
+      if (x >= 0 && x < gridWidth && y >= 0 && y < gridHeight) {
+        const pixel = pixelMap.current.get(`${x},${y}`) || null;
+        onPixelClick(pixel, x, y);
+      }
+    }
+  }, [gridWidth, gridHeight, scale, onPixelClick, clickStartPos, isDragging]);
+
   // Add wheel listener
   useEffect(() => {
     const container = containerRef.current;
@@ -304,13 +463,16 @@ export default function PixelGrid({
   return (
       <div
         ref={containerRef}
-        className="relative w-full h-full overflow-hidden bg-zinc-950"
+        className={`relative w-full h-full overflow-hidden ${theme === 'dark' ? 'bg-zinc-950' : 'bg-gray-50'}`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         onContextMenu={(e) => e.preventDefault()}
-        style={{ cursor: isDragging ? 'grabbing' : 'crosshair' }}
+        style={{ cursor: isDragging ? 'grabbing' : 'crosshair', touchAction: 'none' }}
       >
       <motion.div
         className="absolute"
@@ -339,6 +501,8 @@ export default function PixelGrid({
           ref={canvasRef}
           onMouseDown={handleCanvasMouseDown}
           onClick={handleCanvasClick}
+          onTouchStart={handleCanvasTouchStart}
+          onTouchEnd={handleCanvasTouchEnd}
           className="shadow-2xl"
         />
       </motion.div>
