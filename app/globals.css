@@ -54,6 +54,30 @@ html {
 	scroll-behavior: smooth;
 }
 
+/* Prevent swipe-to-exit on mobile */
+html, body {
+	touch-action: manipulation;
+	overscroll-behavior: none;
+	overscroll-behavior-y: none;
+	-webkit-overflow-scrolling: touch;
+}
+
+/* Additional mobile optimizations */
+@media (max-width: 768px) {
+	/* Force dark theme on mobile */
+	html, body {
+		background: #0e0e10 !important;
+		color: #ffffff !important;
+	}
+	
+	/* Prevent any horizontal/vertical scrolling on mobile that might trigger swipe-to-exit */
+	html, body {
+		overflow-x: hidden;
+		overflow-y: hidden;
+		position: relative;
+	}
+}
+
 /* Custom scrollbar for light and dark themes */
 ::-webkit-scrollbar {
 	width: 10px;

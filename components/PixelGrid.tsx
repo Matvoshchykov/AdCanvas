@@ -67,10 +67,10 @@ export default function PixelGrid({
       const canvasHeight = gridHeight * 10;
       
       if (isMobile) {
-        // Mobile: Start zoomed in to fill screen
-        const maxScaleX = containerWidth / canvasWidth;
-        const maxScaleY = containerHeight / canvasHeight;
-        const zoomedScale = Math.max(maxScaleX, maxScaleY) * 1.2; // Zoomed in with some margin
+        // Mobile: Start zoomed in to clearly see individual pixels
+        // Use a scale that makes pixels clearly visible (around 2-3x larger than grid unit)
+        const baseScale = Math.max(2, Math.min(3, containerWidth / 200)); // Adjust for pixel visibility
+        const zoomedScale = Math.max(baseScale, 1.5); // Minimum 1.5x zoom for mobile
         
         setScale(zoomedScale);
         
@@ -222,7 +222,10 @@ export default function PixelGrid({
       (e.deltaY > 0 ? 0.94 : 1.06) : // Large wheel movements - faster
       (e.deltaY > 0 ? 0.97 : 1.03); // Small wheel movements - faster but smooth
     
-    const newScale = Math.max(0.1, Math.min(10, scale * zoomFactor));
+    // Different zoom limits for mobile vs desktop
+    const minScale = isMobile ? 1.0 : 0.1; // Mobile: minimum 1x zoom to prevent pixels disappearing
+    const maxScale = isMobile ? 5.0 : 10.0; // Mobile: maximum 5x zoom to prevent over-zooming
+    const newScale = Math.max(minScale, Math.min(maxScale, scale * zoomFactor));
     
     // Get mouse position relative to container
     const rect = container.getBoundingClientRect();
@@ -377,7 +380,10 @@ export default function PixelGrid({
       
       if (lastTouchDistance > 0) {
         const scaleFactor = distance / lastTouchDistance;
-        const newScale = Math.max(0.1, Math.min(10, scale * scaleFactor));
+        // Different zoom limits for mobile vs desktop
+        const minScale = isMobile ? 1.0 : 0.1; // Mobile: minimum 1x zoom to prevent pixels disappearing
+        const maxScale = isMobile ? 5.0 : 10.0; // Mobile: maximum 5x zoom to prevent over-zooming
+        const newScale = Math.max(minScale, Math.min(maxScale, scale * scaleFactor));
         
         // Calculate the point under the center of touches before zoom
         const worldX = (center.x - offset.x) / scale;
@@ -511,7 +517,8 @@ export default function PixelGrid({
       <div className="absolute top-6 right-6 flex gap-2">
         <button
           onClick={() => {
-            const newScale = Math.min(10, scale * 1.2);
+            const maxScale = isMobile ? 5.0 : 10.0;
+            const newScale = Math.min(maxScale, scale * 1.2);
             setScale(newScale);
           }}
           className="w-11 h-11 bg-zinc-800/90 hover:bg-zinc-750 backdrop-blur-sm text-zinc-300 hover:text-zinc-100 rounded-xl font-semibold text-lg transition-all duration-200 shadow-lg hover:shadow-xl hover:-translate-y-0.5"
@@ -521,7 +528,8 @@ export default function PixelGrid({
         </button>
         <button
           onClick={() => {
-            const newScale = Math.max(0.1, scale / 1.2);
+            const minScale = isMobile ? 1.0 : 0.1;
+            const newScale = Math.max(minScale, scale / 1.2);
             setScale(newScale);
           }}
           className="w-11 h-11 bg-zinc-800/90 hover:bg-zinc-750 backdrop-blur-sm text-zinc-300 hover:text-zinc-100 rounded-xl font-semibold text-lg transition-all duration-200 shadow-lg hover:shadow-xl hover:-translate-y-0.5"
