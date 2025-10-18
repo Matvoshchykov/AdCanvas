@@ -41,6 +41,7 @@ export default function PixelGrid({
   const [lastTouchDistance, setLastTouchDistance] = useState(0);
   const [lastTouchCenter, setLastTouchCenter] = useState({ x: 0, y: 0 });
   const [isMobile, setIsMobile] = useState(false);
+  const [initialTouchPos, setInitialTouchPos] = useState({ x: 0, y: 0 });
   
   // Create a map of pixels for faster lookup
   const pixelMap = useRef<Map<string, Pixel>>(new Map());
@@ -68,8 +69,8 @@ export default function PixelGrid({
       
       if (isMobile) {
         // Mobile: Start zoomed in to clearly see individual pixels
-        // Use a scale that makes pixels clearly visible (around 2-3x larger than grid unit)
-        const baseScale = Math.max(2, Math.min(3, containerWidth / 200)); // Adjust for pixel visibility
+        // Use a scale that makes pixels clearly visible but stays within our 2.5x limit
+        const baseScale = Math.max(1.5, Math.min(2.2, containerWidth / 250)); // Adjust for pixel visibility
         const zoomedScale = Math.max(baseScale, 1.5); // Minimum 1.5x zoom for mobile
         
         setScale(zoomedScale);
@@ -223,8 +224,8 @@ export default function PixelGrid({
       (e.deltaY > 0 ? 0.97 : 1.03); // Small wheel movements - faster but smooth
     
     // Different zoom limits for mobile vs desktop
-    const minScale = isMobile ? 1.0 : 0.1; // Mobile: minimum 1x zoom to prevent pixels disappearing
-    const maxScale = isMobile ? 5.0 : 10.0; // Mobile: maximum 5x zoom to prevent over-zooming
+    const minScale = isMobile ? 0.5 : 0.1; // Mobile: allow zooming out more
+    const maxScale = isMobile ? 2.5 : 10.0; // Mobile: limit zoom IN to prevent pixels disappearing
     const newScale = Math.max(minScale, Math.min(maxScale, scale * zoomFactor));
     
     // Get mouse position relative to container
@@ -339,15 +340,20 @@ export default function PixelGrid({
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     const container = containerRef.current;
     if (!container) return;
 
     setTouches(e.touches);
     
     if (e.touches.length === 1) {
-      // Single touch - start dragging
+      // Single touch - start dragging, but track initial position to detect horizontal swipes
       const touch = e.touches[0];
       const rect = container.getBoundingClientRect();
+      
+      // Store initial touch position to detect swipe direction
+      setInitialTouchPos({ x: touch.clientX, y: touch.clientY });
+      
       setIsDragging(true);
       setDragStart({ x: touch.clientX - rect.left - offset.x, y: touch.clientY - rect.top - offset.y });
     } else if (e.touches.length === 2) {
@@ -363,13 +369,27 @@ export default function PixelGrid({
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     const container = containerRef.current;
     if (!container) return;
 
     if (e.touches.length === 1 && isDragging) {
-      // Single touch drag
+      // Single touch drag - prevent horizontal swipes that might exit the app
       const touch = e.touches[0];
       const rect = container.getBoundingClientRect();
+      
+      // Calculate movement from initial touch position
+      const deltaX = touch.clientX - initialTouchPos.x;
+      const deltaY = touch.clientY - initialTouchPos.y;
+      
+      // If it's primarily a horizontal swipe (especially left), prevent it
+      if (Math.abs(deltaX) > Math.abs(deltaY) && deltaX < -50) {
+        // This is a left swipe - prevent it from bubbling up to trigger app exit
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      
       const newX = touch.clientX - rect.left - dragStart.x;
       const newY = touch.clientY - rect.top - dragStart.y;
       setOffset({ x: newX, y: newY });
@@ -381,8 +401,8 @@ export default function PixelGrid({
       if (lastTouchDistance > 0) {
         const scaleFactor = distance / lastTouchDistance;
         // Different zoom limits for mobile vs desktop
-        const minScale = isMobile ? 1.0 : 0.1; // Mobile: minimum 1x zoom to prevent pixels disappearing
-        const maxScale = isMobile ? 5.0 : 10.0; // Mobile: maximum 5x zoom to prevent over-zooming
+        const minScale = isMobile ? 0.5 : 0.1; // Mobile: allow zooming out more
+        const maxScale = isMobile ? 2.5 : 10.0; // Mobile: limit zoom IN to prevent pixels disappearing
         const newScale = Math.max(minScale, Math.min(maxScale, scale * scaleFactor));
         
         // Calculate the point under the center of touches before zoom
@@ -400,7 +420,7 @@ export default function PixelGrid({
       setLastTouchDistance(distance);
       setLastTouchCenter(center);
     }
-  }, [scale, offset, isDragging, dragStart, lastTouchDistance]);
+  }, [scale, offset, isDragging, dragStart, lastTouchDistance, initialTouchPos]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     setIsDragging(false);
@@ -517,7 +537,7 @@ export default function PixelGrid({
       <div className="absolute top-6 right-6 flex gap-2">
         <button
           onClick={() => {
-            const maxScale = isMobile ? 5.0 : 10.0;
+            const maxScale = isMobile ? 2.5 : 10.0;
             const newScale = Math.min(maxScale, scale * 1.2);
             setScale(newScale);
           }}
@@ -528,7 +548,7 @@ export default function PixelGrid({
         </button>
         <button
           onClick={() => {
-            const minScale = isMobile ? 1.0 : 0.1;
+            const minScale = isMobile ? 0.5 : 0.1;
             const newScale = Math.max(minScale, scale / 1.2);
             setScale(newScale);
           }}

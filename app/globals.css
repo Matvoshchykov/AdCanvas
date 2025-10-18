@@ -58,6 +58,7 @@ html {
 html, body {
 	touch-action: manipulation;
 	overscroll-behavior: none;
+	overscroll-behavior-x: none;
 	overscroll-behavior-y: none;
 	-webkit-overflow-scrolling: touch;
 }
@@ -75,6 +76,17 @@ html, body {
 		overflow-x: hidden;
 		overflow-y: hidden;
 		position: relative;
+		touch-action: pan-y pinch-zoom; /* Only allow vertical pan and pinch zoom, no horizontal */
+		-webkit-touch-callout: none; /* Prevent callouts */
+		-webkit-user-select: none; /* Prevent text selection */
+		user-select: none;
+	}
+	
+	/* Prevent all swipe gestures that could exit the app */
+	* {
+		touch-action: manipulation;
+		overscroll-behavior: none;
+		-webkit-overflow-scrolling: touch;
 	}
 }
 

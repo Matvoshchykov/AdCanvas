@@ -147,6 +147,43 @@ export default function PixelBoardPage() {
     };
   }, [userId]);
 
+  // Prevent left swipe from exiting the app on mobile
+  useEffect(() => {
+    const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
+    if (!isMobile) return;
+
+    let startX = 0;
+    let startY = 0;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        const deltaX = e.touches[0].clientX - startX;
+        const deltaY = e.touches[0].clientY - startY;
+        
+        // Prevent left swipes that might trigger app exit
+        if (Math.abs(deltaX) > Math.abs(deltaY) && deltaX < -100) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
+    };
+
+    document.addEventListener('touchstart', handleTouchStart, { passive: false });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+
+    return () => {
+      document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, []);
+
   // Handle pixel click
   const handlePixelClick = useCallback((pixel: Pixel | null, x: number, y: number) => {
     if (pixel) {
