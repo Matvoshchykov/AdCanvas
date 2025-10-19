@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useContext, createContext, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import PixelGrid from '@/components/PixelGrid';
@@ -9,28 +9,179 @@ import PlacementControls from '@/components/PlacementControls';
 import { useTheme } from '@/contexts/ThemeContext';
 import type { Database } from '@/lib/database.types';
 
+// Whop User Context for proper authentication state management
+interface WhopUserContextType {
+  user: any;
+  isLoading: boolean;
+  error: string | null;
+}
+
+const WhopUserContext = createContext<WhopUserContextType | null>(null);
+
+
+// Robust Whop user authentication hook using proper React Context integration
+// This hook works within the WhopApp context and waits for proper initialization
+function useWhopUser() {
+  const [user, setUser] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    let authTimer: NodeJS.Timeout;
+
+    const initializeAuthentication = async () => {
+      console.log('🔄 Starting Whop authentication...');
+      
+      try {
+        // Import the components module to ensure it's loaded
+        const components = await import("@whop/react/components");
+        console.log('📦 Whop components loaded successfully');
+
+        // Wait for the DOM and React to be fully ready
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Now poll for user data with multiple strategies
+        let attempts = 0;
+        const maxAttempts = 80; // 8 seconds max
+        
+        const checkForAuthenticatedUser = () => {
+          if (!isMounted) return;
+          
+          attempts++;
+
+          // Strategy 1: Try to access the user through React Context
+          // This is the most reliable method when inside WhopApp
+          let foundUser = null;
+
+          try {
+            // Check if we can find user data through various mechanisms
+            const userSources = [
+              // Primary: Whop SDK global state
+              (window as any).whop?.user,
+              // React context data that might be exposed
+              (window as any).__REACT_CONTEXT_DATA__?.whop?.user,
+              // Alternative global locations
+              (window as any).whopUser,
+              (window as any).WHOP_USER_DATA
+            ];
+
+            foundUser = userSources.find(source => {
+              return source && 
+                     typeof source === 'object' && 
+                     source.id && 
+                     typeof source.id === 'string' &&
+                     source.id.length > 0;
+            });
+
+          } catch (err) {
+            console.log('Error checking user sources:', err);
+          }
+
+          if (foundUser) {
+            console.log('✅ User authenticated successfully:', {
+              id: foundUser.id,
+              name: foundUser.username || foundUser.name || foundUser.displayName || 'User',
+              email: foundUser.email || 'Not provided'
+            });
+
+            if (isMounted) {
+              setUser(foundUser);
+              setIsLoading(false);
+              setError(null);
+            }
+            return;
+          }
+
+          // If no user found and we have more attempts
+          if (attempts < maxAttempts && isMounted) {
+            authTimer = setTimeout(checkForAuthenticatedUser, 100);
+          } else if (isMounted) {
+            // Authentication failed/timeout
+            console.log('❌ Authentication failed - no user data found after', attempts, 'attempts');
+            setIsLoading(false);
+            setError('Unable to authenticate with Whop. Please ensure you are logged in and accessing this app from within Whop.');
+          }
+        };
+
+        // Start the authentication check
+        checkForAuthenticatedUser();
+
+      } catch (initError) {
+        console.error('Authentication initialization error:', initError);
+        if (isMounted) {
+          setIsLoading(false);
+          setError('Failed to initialize authentication. Please refresh the page and try again.');
+        }
+      }
+    };
+
+    // Start authentication with a delay to ensure WhopApp is fully initialized
+    const startAuth = setTimeout(initializeAuthentication, 800);
+
+    return () => {
+      isMounted = false;
+      if (authTimer) clearTimeout(authTimer);
+      if (startAuth) clearTimeout(startAuth);
+    };
+  }, []);
+
+  return { user, isLoading, error };
+}
+
 type Pixel = Database['public']['Tables']['pixels']['Row'];
 
 const GRID_WIDTH = 600;
 const GRID_HEIGHT = 400;
 
-// Safe hook wrapper for development
-function useWhopUser() {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { useUser } = require('@whop/react/hooks') as {
-      useUser: () => { user: any; isLoading: boolean };
+// Iframe detection hook
+function useIframeDetection() {
+  const [isInsideWhop, setIsInsideWhop] = useState<boolean | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const checkIframeContext = () => {
+      try {
+        // Check if we're in an iframe
+        const inIframe = window !== window.top;
+        let inWhopIframe = false;
+        
+        if (inIframe) {
+          try {
+            const parentOrigin = window.parent.location.origin;
+            inWhopIframe = parentOrigin.includes('whop.com');
+          } catch {
+            // Cross-origin access means we're likely in Whop iframe
+            inWhopIframe = true;
+          }
+          
+          if (document.referrer && document.referrer.includes('whop.com')) {
+            inWhopIframe = true;
+          }
+        }
+
+        setIsInsideWhop(inWhopIframe);
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Error detecting iframe context:', error);
+        setIsInsideWhop(false);
+        setIsLoading(false);
+      }
     };
-    return useUser();
-  } catch {
-    // Fallback for development without Whop
-    return { user: null, isLoading: false };
-  }
+
+    checkIframeContext();
+  }, []);
+
+  return { isInsideWhop, isLoading };
 }
+
 
 export default function PixelBoardPage() {
   const { theme } = useTheme();
-  const { user, isLoading: userLoading } = useWhopUser();
+  const { isInsideWhop } = useIframeDetection();
+  
+  // Proper user authentication using Whop SDK
+  const { user, isLoading: userLoading, error: userError } = useWhopUser();
   
   const [pixels, setPixels] = useState<Pixel[]>([]);
   const [selectedPosition, setSelectedPosition] = useState<{ x: number; y: number } | null>(null);
@@ -49,21 +200,19 @@ export default function PixelBoardPage() {
   const [hasPlacedPixel, setHasPlacedPixel] = useState(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
 
-  // Get current user ID (use Whop user or fallback to mock)
-  const userId = user?.id || `mock_user_${typeof window !== 'undefined' ? localStorage.getItem('mockUserId') || Math.random().toString(36).substring(7) : 'dev'}`;
-  // Prioritize actual username from Whop user object
-  const userName = user?.username || user?.name || user?.displayName || user?.email?.split('@')[0] || `User_${userId.slice(-6)}`;
 
-  // Store mock user ID in localStorage for consistency during development
+  // Get authenticated user data
+  const userId = user?.id || null;
+  const userName = user?.username || user?.name || user?.displayName || user?.email?.split('@')[0] || null;
+
+
+  // Don't store mock users when not in Whop iframe
   useEffect(() => {
-    if (!user && typeof window !== 'undefined') {
-      const existingMockId = localStorage.getItem('mockUserId');
-      if (!existingMockId) {
-        const mockId = Math.random().toString(36).substring(7);
-        localStorage.setItem('mockUserId', mockId);
-      }
+    if (!isInsideWhop && typeof window !== 'undefined') {
+      // Clear any existing mock user data when not in iframe
+      localStorage.removeItem('mockUserId');
     }
-  }, [user]);
+  }, [isInsideWhop]);
 
   // Detect mobile device
   useEffect(() => {
@@ -75,14 +224,14 @@ export default function PixelBoardPage() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Check if user needs onboarding - always show on reload
+  // Check if user needs onboarding - wait for user authentication
   useEffect(() => {
-    if (!isLoading && !userLoading && isSupabaseConfigured) {
+    if (!isLoading && !userLoading && isSupabaseConfigured && userId) {
       setShowOnboarding(true);
       setCurrentSlide(0); // Reset to first slide
       setOnboardingUrl(''); // Reset URL input
     }
-  }, [isLoading, userLoading, isSupabaseConfigured]);
+  }, [isLoading, userLoading, isSupabaseConfigured, userId]);
 
   // Fetch initial pixels
   useEffect(() => {
@@ -116,9 +265,10 @@ export default function PixelBoardPage() {
     fetchPixels();
   }, []);
 
-  // Fetch user cooldown
+  // Fetch user cooldown when user is authenticated
   useEffect(() => {
     if (!isSupabaseConfigured || !userId) {
+      setCooldownEnd(null);
       return;
     }
 
@@ -138,7 +288,7 @@ export default function PixelBoardPage() {
     };
 
     fetchCooldown();
-  }, [userId]);
+  }, [userId, isSupabaseConfigured]);
 
   // Check if user has placed pixels before
   useEffect(() => {
@@ -170,7 +320,7 @@ export default function PixelBoardPage() {
           const newPixel = payload.new as Pixel;
           setPixels((prev) => [...prev, newPixel]);
           
-          // Show toast for new pixels from other users
+          // Show toast for new pixels from other users only
           if (newPixel.owner_id !== userId) {
             showToast(
               `${newPixel.owner_name || 'Someone'} placed a pixel at (${newPixel.x}, ${newPixel.y})`,
@@ -257,7 +407,18 @@ export default function PixelBoardPage() {
 
   // Handle pixel placement
   const handlePlacePixel = useCallback(async (color: string, link: string) => {
-    if (!selectedPosition || isPlacing) return;
+    // Block functionality if not in Whop iframe
+    if (isInsideWhop === false) {
+      showToast('This app must be accessed through Whop.com', 'error');
+      return;
+    }
+    
+    if (!selectedPosition || isPlacing || !userId) {
+      if (!userId) {
+        showToast('Please ensure you are logged into Whop to place pixels', 'error');
+      }
+      return;
+    }
 
     // Show first-time modal if user hasn't placed pixels before
     if (!hasPlacedPixel) {
@@ -415,12 +576,48 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_key`}
     );
   }
 
+  // Show loading state while app or user authentication is loading
   if (isLoading || userLoading) {
     return (
       <div className="min-h-screen bg-[#0e0e10] flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-400 text-lg">Loading PixelBoard...</p>
+          <p className="text-gray-400 text-lg">
+            {isLoading ? 'Loading PixelBoard...' : 'Authenticating user...'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show authentication error if user failed to authenticate and we should be in Whop
+  if (userError && isInsideWhop !== false) {
+    return (
+      <div className="min-h-screen bg-[#0e0e10] flex items-center justify-center p-4">
+        <div className="max-w-md mx-auto text-center">
+          <div className="mb-8">
+            <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-red-600 to-red-800 rounded-lg flex items-center justify-center">
+              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold text-white mb-2">
+              Authentication Required
+            </h1>
+            <p className="text-gray-400 text-lg leading-relaxed">
+              {userError}
+            </p>
+          </div>
+          
+          <div className="space-y-4 text-gray-500">
+            <div className="flex items-center justify-center space-x-2">
+              <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+              <span className="text-sm">Please ensure you are logged into Whop</span>
+            </div>
+            <p className="text-sm">
+              If the issue persists, please try refreshing the page or contact support.
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -445,10 +642,13 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_key`}
     );
   }
 
+  // If not in Whop iframe, disable all functionality but show UI
+  const isDisabled = isInsideWhop === false;
+
   return (
     <div className={`min-h-screen ${
       theme === 'dark' ? 'bg-zinc-950 text-white' : 'bg-gray-50 text-gray-900'
-    }`}>
+    } ${isDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
 
       {/* Main Content - Canvas fills full screen */}
       <div className="relative" style={{ height: '100vh' }}>
@@ -483,6 +683,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_key`}
         pixelData={pixels}
         onboardingCompleted={onboardingCompleted}
         userId={userId}
+        userLoading={userLoading}
       />
 
       {/* Onboarding Slideshow Modal */}

@@ -25,6 +25,7 @@ interface PlacementControlsProps {
   pixelData: Pixel[];
   onboardingCompleted?: boolean;
   userId?: string;
+  userLoading?: boolean;
 }
 
 // Generate color spectrum for the slider
@@ -130,6 +131,45 @@ function useIframeSdk() {
   return iframeSdk;
 }
 
+// Iframe detection hook (same as in main page)
+function useIframeDetection() {
+  const [isInsideWhop, setIsInsideWhop] = useState<boolean | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const checkIframeContext = () => {
+      try {
+        const inIframe = window !== window.top;
+        let inWhopIframe = false;
+        
+        if (inIframe) {
+          try {
+            const parentOrigin = window.parent.location.origin;
+            inWhopIframe = parentOrigin.includes('whop.com');
+          } catch {
+            inWhopIframe = true;
+          }
+          
+          if (document.referrer && document.referrer.includes('whop.com')) {
+            inWhopIframe = true;
+          }
+        }
+
+        setIsInsideWhop(inWhopIframe);
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Error detecting iframe context:', error);
+        setIsInsideWhop(false);
+        setIsLoading(false);
+      }
+    };
+
+    checkIframeContext();
+  }, []);
+
+  return { isInsideWhop, isLoading };
+}
+
 export default function PlacementControls({
   selectedPosition,
   selectedPixel,
@@ -142,11 +182,13 @@ export default function PlacementControls({
   pixelData,
   onboardingCompleted,
   userId,
+  userLoading = false,
 }: PlacementControlsProps) {
   const { theme } = useTheme();
   
   // Use the proper iframe SDK hook as per official docs
   const iframeSdk = useIframeSdk();
+  const { isInsideWhop } = useIframeDetection();
   const [color, setColor] = useState('#DC2626');
   const [link, setLink] = useState('');
   const [showSettings, setShowSettings] = useState(false);
@@ -364,8 +406,17 @@ export default function PlacementControls({
 
   // Handle checkout creation for no cooldown button - using official docs pattern
   const handleCheckout = async () => {
+    console.log('Checkout clicked - userId:', userId, 'userLoading:', userLoading);
+    
+    // Simple check: if still loading, wait
+    if (userLoading) {
+      alert('Please wait while we authenticate with Whop...');
+      return;
+    }
+
+    // If no user ID at all, that's a problem
     if (!userId) {
-      alert('User authentication required.');
+      alert('User authentication required. Please ensure you are logged into Whop.');
       return;
     }
 
@@ -381,21 +432,78 @@ export default function PlacementControls({
         },
       });
 
+      // Read the response once
+      const responseText = await response.text();
+      console.log('Raw API response:', responseText);
+      console.log('Response status:', response.status, response.statusText);
+
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Charge creation failed:', errorData);
+        console.error('Charge creation failed - Response not OK:', {
+          status: response.status,
+          statusText: response.statusText,
+          headers: Object.fromEntries(response.headers.entries()),
+          responseText: responseText
+        });
+        
+        let errorData;
+        try {
+          if (responseText && responseText.trim()) {
+            errorData = JSON.parse(responseText);
+          } else {
+            errorData = { error: `Server error (${response.status}): No response body` };
+          }
+        } catch (parseError) {
+          console.error('Failed to parse JSON response:', parseError);
+          errorData = { error: `Server error (${response.status}): ${responseText || 'No response body'}` };
+        }
+        
+        console.error('Parsed error data:', errorData);
         
         // Extract meaningful error information
-        const errorMessage = errorData.error || 'Failed to create charge';
-        const debugInfo = errorData.debug ? `\n\nDebug: ${JSON.stringify(errorData.debug)}` : '';
+        const errorMessage = errorData?.error || errorData?.message || 'Failed to create charge';
+        const debugInfo = errorData?.debug || {};
         
-        console.error('Error details:', { errorData, debugInfo });
-        throw new Error(`Charge creation failed: ${errorMessage}${debugInfo}`);
+        console.error('Error details:', { 
+          errorMessage, 
+          debugInfo,
+          hasErrorDetails: !!debugInfo?.errorDetails,
+          fullErrorData: errorData
+        });
+        
+        // Create a comprehensive error message
+        let fullErrorMessage = `Charge creation failed: ${errorMessage}`;
+        
+        if (debugInfo && typeof debugInfo === 'object') {
+          if (debugInfo.errorDetails?.sdkError?.message) {
+            fullErrorMessage += `\n\nSDK Error: ${debugInfo.errorDetails.sdkError.message}`;
+          }
+          if (debugInfo.duration) {
+            fullErrorMessage += `\nRequest duration: ${debugInfo.duration}ms`;
+          }
+          if (debugInfo.companyId) {
+            fullErrorMessage += `\nCompany ID: ${debugInfo.companyId}`;
+          }
+          if (debugInfo.appId) {
+            fullErrorMessage += `\nApp ID: ${debugInfo.appId}`;
+          }
+        }
+        
+        throw new Error(fullErrorMessage);
       }
 
-      // Get the inAppPurchase object directly (as per docs)
-      const inAppPurchase = await response.json();
-      console.log('Received inAppPurchase object:', inAppPurchase);
+      // Parse successful response
+      let inAppPurchase;
+      try {
+        if (responseText && responseText.trim()) {
+          inAppPurchase = JSON.parse(responseText);
+          console.log('Received inAppPurchase object:', inAppPurchase);
+        } else {
+          throw new Error('Empty response from server');
+        }
+      } catch (parseError) {
+        console.error('Failed to parse successful response:', parseError);
+        throw new Error('Failed to parse server response');
+      }
 
       // 2. Try to open payment modal using iframe SDK (as per docs)
       if (!iframeSdk || !iframeSdk.inAppPurchase) {
@@ -712,19 +820,33 @@ export default function PlacementControls({
             {/* Cooldown Button */}
             <motion.button
               onClick={handleCheckout}
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.98 }}
-              className="px-6 py-3.5 rounded-full font-semibold text-lg tracking-wide transition-all duration-200 bg-green-500 hover:bg-green-600 text-white shadow-2xl hover:shadow-3xl"
-              style={{ 
+              disabled={userLoading}
+              whileHover={!userLoading ? { y: -2 } : {}}
+              whileTap={!userLoading ? { scale: 0.98 } : {}}
+              className={`px-6 py-3.5 rounded-full font-semibold text-lg tracking-wide transition-all duration-200 ${
+                userLoading
+                  ? 'bg-gray-600 cursor-not-allowed opacity-50 text-gray-300' 
+                  : 'bg-green-500 hover:bg-green-600 text-white shadow-2xl hover:shadow-3xl'
+              }`}
+              style={!userLoading ? { 
                 backgroundColor: '#10b981',
                 boxShadow: '0 0 20px rgba(16, 185, 129, 0.5)'
-              }}
+              } : {}}
             >
               <span className="flex items-center gap-2.5">
-                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                </svg>
-                <span>No Cooldown</span>
+                {userLoading ? (
+                  <svg className="w-6 h-6 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                ) : (
+                  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                  </svg>
+                )}
+                <span>
+                  {userLoading ? 'Authenticating...' : 'No Cooldown'}
+                </span>
               </span>
             </motion.button>
           </div>

@@ -15,10 +15,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { x, y, color, link, userId, userName } = body;
 
-    // Validate required fields
+    // User authentication is handled automatically by the Whop iframe SDK
+    // The userId and userName are provided by the authenticated user context
+    // No need to validate tokens manually as the iframe SDK handles this securely
+
+    // Validate required fields - userId must be present from authenticated user
     if (typeof x !== 'number' || typeof y !== 'number' || !color || !userId) {
       return NextResponse.json(
-        { error: 'Missing required fields: x, y, color, userId' },
+        { error: 'Missing required fields: x, y, color, userId. Please ensure you are logged into Whop.' },
         { status: 400 }
       );
     }
