@@ -35,6 +35,7 @@ export default function PixelGrid({
   const [isZooming, setIsZooming] = useState(false);
   const lastWheelTime = useRef(0);
   const zoomTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const zoomAnimationRef = useRef<number | null>(null);
   
   // Mobile touch state
   const [touches, setTouches] = useState<React.TouchList | null>(null);
@@ -45,6 +46,30 @@ export default function PixelGrid({
   
   // Create a map of pixels for faster lookup
   const pixelMap = useRef<Map<string, Pixel>>(new Map());
+
+  // Constrain offset to limit void visibility to 200px in all directions
+  const constrainOffset = useCallback((newX: number, newY: number, currentScale: number) => {
+    const container = containerRef.current;
+    if (!container) return { x: newX, y: newY };
+
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    const canvasWidth = gridWidth * 10;
+    const canvasHeight = gridHeight * 10;
+    const scaledWidth = canvasWidth * currentScale;
+    const scaledHeight = canvasHeight * currentScale;
+
+    // Calculate maximum allowed offsets to show only 200px of void
+    const maxOffsetX = 200; // Right side void limit
+    const minOffsetX = containerWidth - scaledWidth - 200; // Left side void limit
+    const maxOffsetY = 200; // Bottom void limit
+    const minOffsetY = containerHeight - scaledHeight - 200; // Top void limit
+
+    return {
+      x: Math.max(minOffsetX, Math.min(maxOffsetX, newX)),
+      y: Math.max(minOffsetY, Math.min(maxOffsetY, newY))
+    };
+  }, [gridWidth, gridHeight]);
 
   // Detect mobile device
   useEffect(() => {
@@ -189,22 +214,43 @@ export default function PixelGrid({
     }
   }, [pixels, gridWidth, gridHeight, scale, selectedPosition, theme]);
 
-  // Draw the grid with smooth updates
+  // Draw the grid with smooth updates - optimized for zoom performance
   useEffect(() => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
     
-    animationFrameRef.current = requestAnimationFrame(() => {
+    // Use double RAF for smoother rendering during zoom operations
+    const drawFrame = () => {
       drawCanvas();
-    });
+    };
+    
+    if (isZooming) {
+      // During zoom, use immediate redraw for responsiveness
+      requestAnimationFrame(drawFrame);
+    } else {
+      // Normal operation, use standard RAF
+      animationFrameRef.current = requestAnimationFrame(drawFrame);
+    }
 
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [drawCanvas]);
+  }, [drawCanvas, isZooming]);
+
+  // Cleanup zoom animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (zoomAnimationRef.current) {
+        cancelAnimationFrame(zoomAnimationRef.current);
+      }
+      if (zoomTimeoutRef.current) {
+        clearTimeout(zoomTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Handle mouse wheel for zoom - ULTRA SMOOTH ZOOM AT MOUSE POSITION
   const handleWheel = useCallback((e: WheelEvent) => {
@@ -213,19 +259,43 @@ export default function PixelGrid({
     const container = containerRef.current;
     if (!container) return;
 
-    // Throttle zoom updates for ultra smooth experience
+    // Cancel any pending animation frame
+    if (zoomAnimationRef.current) {
+      cancelAnimationFrame(zoomAnimationRef.current);
+    }
+
+    // Reduced throttling for even smoother experience
     const now = Date.now();
-    if (now - lastWheelTime.current < 16) return; // ~60fps limit
+    if (now - lastWheelTime.current < 4) return; // ~240fps for ultra-smooth updates
     lastWheelTime.current = now;
 
-    // Faster zoom increments for responsive zooming
-    const zoomFactor = Math.abs(e.deltaY) > 100 ? 
-      (e.deltaY > 0 ? 0.94 : 1.06) : // Large wheel movements - faster
-      (e.deltaY > 0 ? 0.97 : 1.03); // Small wheel movements - faster but smooth
+    // Adaptive zoom factors - smaller increments for smoother feel
+    let zoomFactor;
+    if (scale > 3) {
+      // When very zoomed in, use very fine increments
+      zoomFactor = Math.abs(e.deltaY) > 100 ? 
+        (e.deltaY > 0 ? 0.985 : 1.015) : 
+        (e.deltaY > 0 ? 0.995 : 1.005);
+    } else if (scale > 1.5) {
+      // Medium zoom level - fine increments
+      zoomFactor = Math.abs(e.deltaY) > 100 ? 
+        (e.deltaY > 0 ? 0.975 : 1.025) :
+        (e.deltaY > 0 ? 0.985 : 1.015);
+    } else if (scale > 0.5) {
+      // Medium-low zoom level - balanced increments
+      zoomFactor = Math.abs(e.deltaY) > 100 ? 
+        (e.deltaY > 0 ? 0.96 : 1.04) :
+        (e.deltaY > 0 ? 0.98 : 1.02);
+    } else {
+      // Very far out zoom - slightly larger increments but still smooth
+      zoomFactor = Math.abs(e.deltaY) > 100 ? 
+        (e.deltaY > 0 ? 0.94 : 1.06) :
+        (e.deltaY > 0 ? 0.97 : 1.03);
+    }
     
     // Different zoom limits for mobile vs desktop
-    const minScale = isMobile ? 0.5 : 0.1; // Mobile: allow zooming out more
-    const maxScale = isMobile ? 2.5 : 10.0; // Mobile: limit zoom IN to prevent pixels disappearing
+    const minScale = isMobile ? 0.5 : 0.1;
+    const maxScale = isMobile ? 2.5 : 10.0;
     const newScale = Math.max(minScale, Math.min(maxScale, scale * zoomFactor));
     
     // Get mouse position relative to container
@@ -241,16 +311,20 @@ export default function PixelGrid({
     const newOffsetX = mouseX - worldX * newScale;
     const newOffsetY = mouseY - worldY * newScale;
     
+    // Immediate update for smoother feel, then clean up
     setIsZooming(true);
     setScale(newScale);
-    setOffset({ x: newOffsetX, y: newOffsetY });
     
-    // Reset zooming flag after a short delay with proper cleanup
+    // Apply constraints to zoom offset to limit void visibility
+    const constrainedOffset = constrainOffset(newOffsetX, newOffsetY, newScale);
+    setOffset(constrainedOffset);
+    
+    // Reset zooming flag after a shorter delay
     if (zoomTimeoutRef.current) {
       clearTimeout(zoomTimeoutRef.current);
     }
-    zoomTimeoutRef.current = setTimeout(() => setIsZooming(false), 150);
-  }, [scale, offset]);
+    zoomTimeoutRef.current = setTimeout(() => setIsZooming(false), 50);
+  }, [scale, offset, isMobile, constrainOffset]);
 
   // Handle mouse down for dragging - only right click
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -262,18 +336,20 @@ export default function PixelGrid({
     }
   }, [offset]);
 
-  // Handle mouse move - FREE MOVEMENT, NO RESTRICTIONS
+  // Handle mouse move - constrained to limit void visibility
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (isDragging) {
-        // Calculate new offset - completely free, no boundaries
+        // Calculate new offset
         const newX = e.clientX - dragStart.x;
         const newY = e.clientY - dragStart.y;
 
-        setOffset({ x: newX, y: newY });
+        // Apply constraints to limit void visibility to 200px
+        const constrainedOffset = constrainOffset(newX, newY, scale);
+        setOffset(constrainedOffset);
       }
     },
-    [isDragging, dragStart]
+    [isDragging, dragStart, constrainOffset, scale]
   );
 
   // Handle mouse up
@@ -392,7 +468,10 @@ export default function PixelGrid({
       
       const newX = touch.clientX - rect.left - dragStart.x;
       const newY = touch.clientY - rect.top - dragStart.y;
-      setOffset({ x: newX, y: newY });
+      
+      // Apply constraints to limit void visibility to 200px
+      const constrainedOffset = constrainOffset(newX, newY, scale);
+      setOffset(constrainedOffset);
     } else if (e.touches.length === 2) {
       // Two finger pinch zoom
       const distance = getTouchDistance(e.touches);
@@ -414,13 +493,16 @@ export default function PixelGrid({
         const newOffsetY = center.y - worldY * newScale;
         
         setScale(newScale);
-        setOffset({ x: newOffsetX, y: newOffsetY });
+        
+        // Apply constraints to touch zoom offset to limit void visibility
+        const constrainedOffset = constrainOffset(newOffsetX, newOffsetY, newScale);
+        setOffset(constrainedOffset);
       }
       
       setLastTouchDistance(distance);
       setLastTouchCenter(center);
     }
-  }, [scale, offset, isDragging, dragStart, lastTouchDistance, initialTouchPos]);
+  }, [scale, offset, isDragging, dragStart, lastTouchDistance, initialTouchPos, constrainOffset]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     setIsDragging(false);
@@ -514,13 +596,13 @@ export default function PixelGrid({
         }}
         transition={isZooming ? {
           type: 'tween',
-          duration: 0,
+          duration: 0, // No transition delay during zoom for immediate response
           ease: 'linear'
         } : {
           type: 'spring', 
-          stiffness: 500, 
-          damping: 35,
-          mass: 0.2
+          stiffness: scale > 3 ? 1200 : 800, // Higher stiffness for more responsive movement
+          damping: scale > 3 ? 60 : 40, // Balanced damping for smooth but responsive movement
+          mass: 0.05 // Lighter mass for ultra-responsive movement
         }}
       >
         <canvas
@@ -549,7 +631,7 @@ export default function PixelGrid({
         <button
           onClick={() => {
             const minScale = isMobile ? 0.5 : 0.1;
-            const newScale = Math.max(minScale, scale / 1.2);
+            const newScale = Math.max(minScale, scale / 1.1);
             setScale(newScale);
           }}
           className="w-11 h-11 bg-zinc-800/90 hover:bg-zinc-750 backdrop-blur-sm text-zinc-300 hover:text-zinc-100 rounded-xl font-semibold text-lg transition-all duration-200 shadow-lg hover:shadow-xl hover:-translate-y-0.5"
@@ -572,10 +654,12 @@ export default function PixelGrid({
               const pixelCenterX = selectedPosition.x * pixelSize + pixelSize / 2;
               const pixelCenterY = selectedPosition.y * pixelSize + pixelSize / 2;
               
-              setOffset({
-                x: containerWidth / 2 - pixelCenterX,
-                y: containerHeight / 2 - pixelCenterY,
-              });
+              const newOffsetX = containerWidth / 2 - pixelCenterX;
+              const newOffsetY = containerHeight / 2 - pixelCenterY;
+              
+              // Apply constraints to center on pixel
+              const constrainedOffset = constrainOffset(newOffsetX, newOffsetY, scale);
+              setOffset(constrainedOffset);
             } else {
               // No selected pixel - reset to fit full view
               const minScaleX = containerWidth / canvasWidth;
@@ -586,10 +670,12 @@ export default function PixelGrid({
               
               const scaledWidth = canvasWidth * fitScale;
               const scaledHeight = canvasHeight * fitScale;
-              setOffset({ 
-                x: (containerWidth - scaledWidth) / 2, 
-                y: (containerHeight - scaledHeight) / 2 
-              });
+              const newOffsetX = (containerWidth - scaledWidth) / 2;
+              const newOffsetY = (containerHeight - scaledHeight) / 2;
+              
+              // Apply constraints to reset view
+              const constrainedOffset = constrainOffset(newOffsetX, newOffsetY, fitScale);
+              setOffset(constrainedOffset);
             }
           }}
           className="w-11 h-11 bg-zinc-800/90 hover:bg-zinc-750 backdrop-blur-sm text-zinc-300 hover:text-zinc-100 rounded-xl text-base transition-all duration-200 shadow-lg hover:shadow-xl hover:-translate-y-0.5"

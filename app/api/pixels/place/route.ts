@@ -8,7 +8,7 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.
 // Create a Supabase client with service role for backend operations
 const supabase = createClient<Database>(supabaseUrl, supabaseServiceKey);
 
-const COOLDOWN_MINUTES = 10;
+const COOLDOWN_MINUTES = 15;
 
 export async function POST(request: NextRequest) {
   try {

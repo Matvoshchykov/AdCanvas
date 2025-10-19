@@ -7,7 +7,7 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.
 
 const supabase = createClient<Database>(supabaseUrl, supabaseServiceKey);
 
-const COOLDOWN_MINUTES = 10;
+const COOLDOWN_MINUTES = 15;
 
 export async function GET(request: NextRequest) {
   try {
